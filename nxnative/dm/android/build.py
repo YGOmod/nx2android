@@ -32,10 +32,20 @@ def host_dir(base, tool):
     if not sys.platform.startswith('linux'): return 'darwin-x86_64'
     if platform.machine() in ('aarch64', 'arm64') and (Path(a.ndk) / base / 'linux-aarch64' / tool).exists(): return 'linux-aarch64'
     return 'linux-x86_64'
-host = host_dir('toolchains/llvm/prebuilt', 'bin/clang')
-bin_ = Path(a.ndk) / 'toolchains/llvm/prebuilt' / host / 'bin'
-CC = str(bin_ / ('clang.exe' if os.name == 'nt' else 'clang'))
-TARGET = f'--target=aarch64-linux-android{a.api}'
+# Termux (Android, aarch64)
+import shutil as _sh
+TERMUX = bool(os.environ.get('TERMUX_VERSION')) or 'com.termux' in os.environ.get('PREFIX', '')
+SYSLIBS = []
+if TERMUX:
+    for _tool in ('clang', 'clang++', 'glslc', 'llvm-strip', 'ld.lld'):
+        if not _sh.which(_tool): sys.exit(f'Termux: {_tool} not found (pkg install clang lld llvm shaderc ndk-sysroot vulkan-headers)')
+    bin_ = Path(_sh.which('clang')).parent
+    CC = _sh.which('clang')
+    SYSLIBS = [f'-L{d}' for d in ('/system/lib64', '/apex/com.android.runtime/lib64/bionic') if os.path.isdir(d)]   # first: the device's complete libc, not the sysroot's API 24 stub
+else:
+    host = host_dir('toolchains/llvm/prebuilt', 'bin/clang')
+    bin_ = Path(a.ndk) / 'toolchains/llvm/prebuilt' / host / 'bin'
+    CC = str(bin_ / ('clang.exe' if os.name == 'nt' else 'clang'))TARGET = f'--target=aarch64-linux-android{a.api}'
 out = Path(a.out) if a.out else DM / 'android/out' / (a.game + ('-release' if a.release else ''))
 DBG = [] if a.release else ['-g']
 obj = out / 'obj'; gen = out / 'gen'; obj.mkdir(parents=True, exist_ok=True); (gen / a.game).mkdir(parents=True, exist_ok=True)
@@ -46,7 +56,7 @@ subprocess.run([sys.executable, str(DM / 'games/game.py'), 'header', a.game, str
 subprocess.run([sys.executable, str(DM / 'android/tools/android_profile.py'), 'header', a.game, str(gen / a.game / 'android_profile.h')], check=True)
 
 # the backend's own small shaders (dm/android/shaders): compiled with the NDK's glslc, embedded as gen/<name>_<stage>.spv.h
-GLSLC = Path(a.ndk) / 'shader-tools' / host_dir('shader-tools', 'glslc') / ('glslc.exe' if os.name == 'nt' else 'glslc')
+GLSLC = Path(shutil.which('glslc')) if TERMUX else Path(a.ndk) / 'shader-tools' / host_dir('shader-tools', 'glslc') / ('glslc.exe' if os.name == 'nt' else 'glslc')
 for sh in sorted((DM / 'android/shaders').glob('*.*')):
     hdr = gen / a.game / f'{sh.stem}_{sh.suffix[1:]}.spv.h'
     if hdr.exists() and hdr.stat().st_mtime >= sh.stat().st_mtime: continue
@@ -118,7 +128,7 @@ if failed and not a.keep_going: sys.exit(1)
 if a.only_compile: sys.exit(1 if failed else 0)
 
 LIBS = ['-landroid', '-llog', '-lvulkan', '-laaudio', '-lnativewindow', '-lmediandk', '-lz', '-lm', '-ldl']   # -lz: the gamepad theme's PNGs (overlay_theme.c)
-LDFLAGS = [TARGET, '-fuse-ld=lld', '-Wl,--error-limit=0', '-Wl,-z,max-page-size=16384', '-Wl,--build-id', '-Wl,-z,nostart-stop-gc']
+LDFLAGS = [TARGET, '-fuse-ld=lld'] + SYSLIBS + ['-Wl,--error-limit=0', '-Wl,-z,max-page-size=16384', '-Wl,--build-id', '-Wl,-z,nostart-stop-gc']
 if a.exe:
     r = subprocess.run([CC] + LDFLAGS + ['-pie', '-o', str(out / 'dmhost')] + [str(o) for o in objs + vobjs] + LIBS, capture_output=True, text=True, errors='replace')
     print(r.stderr.strip() if r.returncode else f'linked {out / "dmhost"}', file=sys.stderr if r.returncode else sys.stdout)
@@ -128,7 +138,7 @@ if a.lib:
     print(r.stderr.strip() if r.returncode else f'linked {out / "libdmhost.so"}', file=sys.stderr if r.returncode else sys.stdout)
     if r.returncode: sys.exit(1)
     if a.release:   # the static symbol table goes too (the dynamic one stays: ANativeActivity_onCreate)
-        subprocess.run([str(bin_ / ('llvm-strip.exe' if os.name == 'nt' else 'llvm-strip')), '--strip-unneeded', str(out / 'libdmhost.so')], check=True)
+        subprocess.run([shutil.which('llvm-strip') if TERMUX else str(bin_ / ('llvm-strip.exe' if os.name == 'nt' else 'llvm-strip')), '--strip-unneeded', str(out / 'libdmhost.so')], check=True)
         print(f'stripped {out / "libdmhost.so"}: {(out / "libdmhost.so").stat().st_size // 1024} KB')
 
 # --adrenotools: libadrenotools.so (gfx_vk_core.c vk_init loads a custom Vulkan driver through it, DM_VK_DRIVER) and the hooks it loads from the APK's library folder,
@@ -137,7 +147,7 @@ if a.adrenotools:
     AT = DM / 'third_party/libadrenotools'; LN = AT / 'lib/linkernsbypass'
     ATF = [TARGET, '-O2'] + DBG + ['-fPIC', '-w', f'-I{AT / "include"}', f'-I{AT}', f'-I{LN}']
     ATL = ['-fuse-ld=lld', '-shared', '-Wl,-z,max-page-size=16384', '-static-libstdc++', '-landroid', '-llog', '-ldl']
-    CXX = str(bin_ / ('clang++.exe' if os.name == 'nt' else 'clang++'))
+    CXX = shutil.which('clang++') if TERMUX else str(bin_ / ('clang++.exe' if os.name == 'nt' else 'clang++'))
     libs = [('libadrenotools.so', [AT / 'src/driver.cpp', AT / 'src/bcenabler.cpp', LN / 'android_linker_ns.cpp', LN / 'elf_soname_patcher.cpp'], []),
             ('libhook_impl.so', [AT / 'src/hook/hook_impl.cpp', LN / 'android_linker_ns.cpp', LN / 'elf_soname_patcher.cpp'], ['-fvisibility=hidden'])]
     libs += [(f'lib{h}.so', [AT / f'src/hook/{h}.c'], ['-Wl,-z,global', f'-L{out}', '-lhook_impl']) for h in ('main_hook', 'file_redirect_hook', 'gsl_alloc_hook')]
