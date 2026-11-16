@@ -202,6 +202,11 @@ def cmd_devices(a):
 def cmd_tools(a):
     from porter import fetch
     from porter.upstream import BuildError
+    from porter.paths import is_termux
+    if is_termux():
+        from porter import toolchain
+        print('Termux: install the tools with pkg install ' + toolchain.TERMUX_PKGS);
+        return 0
     names = [{'ndk': 'Android NDK', 'dotnet': '.NET SDK', 'adb': 'adb'}[n.strip()] for n in a.only.split(',') if n.strip()] or None
     if a.download:
         def go():

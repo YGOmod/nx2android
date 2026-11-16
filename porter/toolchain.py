@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from porter import config
-from porter.paths import LOCAL_TOOLS, player_tools
+from porter.paths import LOCAL_TOOLS, TERMUX_PREFIX, is_termux, player_tools
 
 NDK_REVISION = '27.2.12479018'   # r27c: the NDK the Android host is built and tested with
 NDK_RELEASE = 'r27c'
@@ -47,7 +47,31 @@ def ndk_revision(d):   # Pkg.Revision from an NDK folder's source.properties, No
     return m.group(1) if m else None
 
 
+TERMUX_PKGS = 'python clang lld llvm shaderc ndk-sysroot dotnet-sdk-10.0 zlib libzstd python-pillow'
+TERMUX_HEADERS = ['android/native_window.h', 'android/native_activity.h', 'aaudio/AAudio.h', 'media/NdkMediaCodec.h', 'jni.h']
+TERMUX_SYSTEM_LIBS = ['libvulkan.so', 'libaaudio.so', 'libmediandk.so', 'libnativewindow.so', 'libandroid.so']
+
+
+def termux_system_libdirs():
+    return [d for d in ('/system/lib64', '/apex/com.android.runtime/lib64/bionic') if os.path.isdir(d)]
+
+
+def termux_native():
+    """Termux's own toolchain"""
+    miss = [t for t in ('clang', 'ld.lld', 'llvm-strip', 'glslc') if not shutil.which(t)]
+    miss += [f'header {h}' for h in TERMUX_HEADERS if not (TERMUX_PREFIX / 'include' / h).is_file()]
+    libdirs = termux_system_libdirs()
+    miss += [f'device library {l}' for l in TERMUX_SYSTEM_LIBS if not any((Path(d) / l).exists() for d in libdirs + [str(TERMUX_PREFIX / 'lib')])]
+    return not miss, ('clang, lld, glslc and the NDK headers at ' + str(TERMUX_PREFIX)) if not miss else 'missing: ' + ', '.join(miss), miss
+
+
 def find_ndk(cfg=None):
+    if is_termux():
+        return (TERMUX_PREFIX, 'termux') if termux_native()[0] else (None, None)
+    return _find_ndk(cfg)
+
+
+def _find_ndk(cfg=None):
     """(folder, revision) of the NDK to build with: the configured one, ANDROID_NDK_HOME / ANDROID_NDK_ROOT, then the usual install places; r27c is preferred when several are found"""
     cfg = cfg if cfg is not None else config.load()
     given = [cfg.get('ndk'), os.environ.get('ANDROID_NDK_HOME'), os.environ.get('ANDROID_NDK_ROOT')]
@@ -66,7 +90,7 @@ def find_dotnet(cfg=None):
     if cfg.get('dotnet') and Path(cfg['dotnet']).is_file(): return Path(cfg['dotnet'])
     progs = [os.environ.get(k) for k in ('ProgramFiles', 'ProgramW6432')] if os.name == 'nt' else []
     cands = [os.environ.get('DOTNET_ROOT') and str(Path(os.environ['DOTNET_ROOT']) / f'dotnet{EXE}'), shutil.which('dotnet'), str(LOCAL_TOOLS / 'dotnet' / f'dotnet{EXE}'), str(player_tools() / 'dotnet' / f'dotnet{EXE}'),
-             str(Path.home() / '.dotnet' / f'dotnet{EXE}'), *[str(Path(p) / 'dotnet' / f'dotnet{EXE}') for p in progs if p], '/usr/local/share/dotnet/dotnet']
+             str(Path.home() / '.dotnet' / f'dotnet{EXE}'), str(TERMUX_PREFIX / 'lib/dotnet/dotnet'), *[str(Path(p) / 'dotnet' / f'dotnet{EXE}') for p in progs if p], '/usr/local/share/dotnet/dotnet']
     found = list(dict.fromkeys(Path(c) for c in cands if c and Path(c).is_file()))
     return next((d for d in found if any(int(s.split('.')[0]) >= DOTNET_MAJOR for s in dotnet_sdks(d))), found[0] if found else None)
 
@@ -110,7 +134,10 @@ def checks(cfg=None, keys=None):
     out.append(Check('pycryptodome', aes, 'NSZ / XCZ dumps (porter.dumps)' if aes else 'missing: NSZ / XCZ dumps must be decompressed to NSP / XCI first', required=False, fix='' if aes else 'pip install pycryptodome'))
     out.append(Check('fontTools', _importable('fontTools'), 'the button icons in game text' if _importable('fontTools') else 'missing: button icons in game text draw as "?"', required=False, fix='pip install fonttools'))
     ndk, rev = find_ndk(cfg)
-    if not ndk: out.append(Check('Android NDK', False, 'not found', fix=f'Download missing tools, or install NDK {NDK_RELEASE} (developer.android.com/ndk/downloads) and set its folder'))
+    if is_termux():
+        ok, detail, _ = termux_native()
+        out.append(Check('Native toolchain', ok, detail, path=str(TERMUX_PREFIX), fix='' if ok else 'pkg install ' + TERMUX_PKGS + ' (or run termux/setup.sh)'))
+    elif not ndk: out.append(Check('Android NDK', False, 'not found', fix=f'Download missing tools, or install NDK {NDK_RELEASE} (developer.android.com/ndk/downloads) and set its folder'))
     else: out.append(Check('Android NDK', rev == NDK_REVISION, f'{rev} at {ndk}' + ('' if rev == NDK_REVISION else f': the host is built with {NDK_RELEASE} ({NDK_REVISION}); others are untested'),
                            required=rev.split('.')[0] == NDK_REVISION.split('.')[0], path=str(ndk), fix='' if rev == NDK_REVISION else f'install NDK {NDK_RELEASE}'))
     dn = find_dotnet(cfg)
@@ -126,7 +153,7 @@ def checks(cfg=None, keys=None):
     where = Path(cfg.get('out') or Path.home())   # the output folder's drive, or the home folder's (a port's build folder goes beside the game files: the port checks that drive itself)
     where = next((p for p in (where, *where.parents) if p.exists()), Path.home())
     free = shutil.disk_usage(where).free / 2**30
-    out.append(Check('Disk space', free >= DISK_GB, f'{free:.0f} GB free on {where.anchor}', required=False,
+    out.append(Check('Disk space', free >= DISK_GB, f'{free:.0f} GB free on {where.anchor or where}', required=False,
                      fix='' if free >= DISK_GB else f'a port takes about twice its game files on the game folder\'s drive (NEO: 7 GB); keep {DISK_GB} GB free'))
     return out
 
@@ -137,4 +164,4 @@ def require(cfg=None, keys=None, adb=False):
     bad = [r for r in rows if not r.ok and (r.required or (adb and r.name == 'adb'))]
     if bad: raise ToolError('missing requirements: ' + '; '.join(f'{r.name}: {r.detail}' + (f' ({r.fix})' if r.fix else '') for r in bad))
     by = {r.name: r for r in rows}
-    return {'ndk': Path(by['Android NDK'].path), 'dotnet': Path(by['.NET SDK'].path), 'adb': Path(by['adb'].path) if by['adb'].ok else None}
+    return {'ndk': Path(by['Native toolchain' if is_termux() else 'Android NDK'].path), 'dotnet': Path(by['.NET SDK'].path), 'adb': Path(by['adb'].path) if by['adb'].ok else None}

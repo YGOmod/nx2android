@@ -5,6 +5,11 @@ from pathlib import Path
 REPO = Path(sys.executable).parent if getattr(sys, 'frozen', False) else Path(__file__).resolve().parent.parent   # the bundle: nxnative/ beside nx2android.exe
 NXNATIVE = REPO / 'nxnative'
 DM = NXNATIVE / 'dm'
+def is_termux():
+    return bool(os.environ.get('TERMUX_VERSION')) or 'com.termux' in os.environ.get('PREFIX', '')
+
+
+TERMUX_PREFIX = Path(os.environ.get('PREFIX') or '/data/data/com.termux/files/usr')
 LOCAL_TOOLS = REPO / 'tools'   # a developer's toolchains next to the repository (not committed); the player installs their own
 
 

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from porter import config, toolchain
-from porter.paths import player_tools
+from porter.paths import is_termux, player_tools
 from porter.upstream import BuildError, PROG
 
 GOOGLE = 'https://dl.google.com/android/repository/'
@@ -72,11 +72,15 @@ def _dotnet():
 def missing(cfg=None):
     """The doctor's rows a download can fix: NDK r27c, .NET SDK 10, adb"""
     rows = {r.name: r for r in toolchain.checks(cfg)}
+    if is_termux():
+        return [n for n in ('Native toolchain', '.NET SDK', 'adb') if n in rows and not rows[n].ok]
     return [n for n in ('Android NDK', '.NET SDK', 'adb') if not rows[n].ok]
 
 
 def plan(names=None):
     """The Items to download: the missing tools (or `names`), with their sizes"""
+    if is_termux():
+        raise BuildError('on Termux the tools come from pkg, pkg install ' + toolchain.TERMUX_PKGS)
     names = missing() if names is None else names
     out, index = [], None
     for n in names:
