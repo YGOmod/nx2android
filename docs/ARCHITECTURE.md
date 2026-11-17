@@ -119,6 +119,8 @@ checks synthetic planes and padding; physical-device qualification is separate.
 
 The shader translator's existing native-perspective compensation rule accepts either outer operand order in `(input * FragCoord.w) * (1 / FragCoord.w)`. Both alpha depth and material variants must reach the same native interpolated input; leaving the multiply/divide round trip in only one variant can change alpha coverage and retain old HDR colour. The FP32, input-load, FragCoord.w and constant-one guards remain in place.
 
+Opaque NVN sampler objects keep all sampler parameters after an eight-byte header, within the smallest public object's storage. Engines may hash the bytes after that header before calling `SamplerCompare`. Putting filtering or wrap parameters in the skipped header makes different sampler states collide, defeats cache reuse and can exhaust the game's descriptor pool. In Odyssey, duplicate entries accumulated during extended play and repeated scene loads, exhausted the sampler pool and returned sampler ID 0, producing ground grid artifacts. The builder, initializer, comparison, getters and both graphics backends share the same parameter structure; this layout rule does not change filtering defaults.
+
 ## Game profiles on Android
 
 A profile is offered for Android when it has an `android.tsv`; the profiles without one (52 of the 54 today, upstream's iOS games) show as "ios only": an experimental port can still try them. `android.tsv` holds, one `key<TAB>value` row each:
@@ -272,7 +274,7 @@ Events: with `--progress json`, every line on stdout is one JSON object, the pro
 
 ## Android input
 
-**Show gamepad** is saved in `settings.txt`. When enabled, the on-screen controls hide on a mapped controller button press or when stick, D-pad or trigger motion reaches the same activation thresholds as gameplay. A touch restores the controls for the next press, including while a controller is still attached. Button releases still reach the game but leave the restored touch controls visible. The last used controller disconnecting also restores the controls. When **Show gamepad** is off, only the draggable menu button is visible and all other touches go to the game. The menu button stays available in either mode. The controller count (`pad_watch`) is used for vibration routing.
+**Show gamepad** is saved in `settings.txt`. When enabled, the on-screen controls hide on a mapped controller button press or when stick, D-pad or trigger motion reaches the same activation thresholds as gameplay, from input the game sees as player 1's: player 1's controller, a keyboard or remote (which feed player 1), and in a one-player game every controller, as all of them play as player 1. Another player's input leaves the controls as they are, so a player 1 on touch keeps them while player 2 plays on a controller. A touch restores the controls for the next press, including while a controller is still attached. Button releases still reach the game but leave the restored touch controls visible. The last used controller disconnecting also restores the controls. When **Show gamepad** is off, only the draggable menu button is visible and all other touches go to the game. The menu button stays available in either mode. The controller count (`pad_watch`) is used for vibration routing.
 
 ## What the player installs
 
