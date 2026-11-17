@@ -136,7 +136,7 @@ def checks(cfg=None, keys=None):
     ndk, rev = find_ndk(cfg)
     if is_termux():
         ok, detail, _ = termux_native()
-        out.append(Check('Native toolchain', ok, detail, path=str(TERMUX_PREFIX), fix='' if ok else 'pkg install ' + TERMUX_PKGS + ' (or run termux/setup.sh)'))
+        out.append(Check('Native toolchain', ok, detail, path=str(TERMUX_PREFIX), fix='' if ok else 'pkg install ' + TERMUX_PKGS))
     elif not ndk: out.append(Check('Android NDK', False, 'not found', fix=f'Download missing tools, or install NDK {NDK_RELEASE} (developer.android.com/ndk/downloads) and set its folder'))
     else: out.append(Check('Android NDK', rev == NDK_REVISION, f'{rev} at {ndk}' + ('' if rev == NDK_REVISION else f': the host is built with {NDK_RELEASE} ({NDK_REVISION}); others are untested'),
                            required=rev.split('.')[0] == NDK_REVISION.split('.')[0], path=str(ndk), fix='' if rev == NDK_REVISION else f'install NDK {NDK_RELEASE}'))

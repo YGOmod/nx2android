@@ -45,7 +45,8 @@ if TERMUX:
 else:
     host = host_dir('toolchains/llvm/prebuilt', 'bin/clang')
     bin_ = Path(a.ndk) / 'toolchains/llvm/prebuilt' / host / 'bin'
-    CC = str(bin_ / ('clang.exe' if os.name == 'nt' else 'clang'))TARGET = f'--target=aarch64-linux-android{a.api}'
+    CC = str(bin_ / ('clang.exe' if os.name == 'nt' else 'clang'))
+TARGET = f'--target=aarch64-linux-android{a.api}'
 out = Path(a.out) if a.out else DM / 'android/out' / (a.game + ('-release' if a.release else ''))
 DBG = [] if a.release else ['-g']
 obj = out / 'obj'; gen = out / 'gen'; obj.mkdir(parents=True, exist_ok=True); (gen / a.game).mkdir(parents=True, exist_ok=True)
@@ -56,7 +57,7 @@ subprocess.run([sys.executable, str(DM / 'games/game.py'), 'header', a.game, str
 subprocess.run([sys.executable, str(DM / 'android/tools/android_profile.py'), 'header', a.game, str(gen / a.game / 'android_profile.h')], check=True)
 
 # the backend's own small shaders (dm/android/shaders): compiled with the NDK's glslc, embedded as gen/<name>_<stage>.spv.h
-GLSLC = Path(shutil.which('glslc')) if TERMUX else Path(a.ndk) / 'shader-tools' / host_dir('shader-tools', 'glslc') / ('glslc.exe' if os.name == 'nt' else 'glslc')
+GLSLC = Path(_sh.which('glslc')) if TERMUX else Path(a.ndk) / 'shader-tools' / host_dir('shader-tools', 'glslc') / ('glslc.exe' if os.name == 'nt' else 'glslc')
 for sh in sorted((DM / 'android/shaders').glob('*.*')):
     hdr = gen / a.game / f'{sh.stem}_{sh.suffix[1:]}.spv.h'
     if hdr.exists() and hdr.stat().st_mtime >= sh.stat().st_mtime: continue
